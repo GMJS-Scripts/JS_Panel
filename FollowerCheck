@@ -1,0 +1,154 @@
+import requests
+from PIL import Image
+from io import BytesIO
+import customtkinter as ctk
+from customtkinter import CTkImage  # Importa o CTkImage
+
+class RobloxFollowerChecker(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.base_follow_url = "https://friends.roblox.com/v1/users/{}/followings?limit=100&sortOrder=Asc"
+        self.base_user_id_url = "https://users.roblox.com/v1/usernames/users"
+        self.base_thumbnail_url = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={}&size=50x50&format=Png&isCircular=false&thumbnailType=HeadShot"
+
+        self.header_id = None
+        self.user_id = None
+        self.header_image = None  # Para armazenar a imagem PIL
+        self.user_image = None  # Para armazenar a imagem PIL
+        self.header_image_ctk = None  # Para armazenar a imagem CTkImage
+        self.user_image_ctk = None  # Para armazenar a imagem CTkImage
+        self.init_ui()
+
+    def init_ui(self):
+        self.title("Roblox Follower Checker")
+        self.geometry("350x600")
+        
+        layout = ctk.CTkFrame(self)
+        layout.pack(padx=20, pady=20, fill="both", expand=True)
+        
+        # Header Section
+        header_label = ctk.CTkLabel(layout, text="Definir Usuário Header", font=("Arial", 18))
+        header_label.pack(pady=(10, 5))
+
+        self.header_entry = ctk.CTkEntry(layout)
+        self.header_entry.pack(pady=(5, 10))
+        
+        self.header_button = ctk.CTkButton(layout, text="Definir Header", command=self.set_header)
+        self.header_button.pack(pady=5)
+
+        self.header_status_label = ctk.CTkLabel(layout, text="")
+        self.header_status_label.pack(pady=(5, 15))
+
+        self.header_image_label = ctk.CTkLabel(layout, text="")  # Placeholder for header image
+        self.header_image_label.pack()
+
+        # User Search Section
+        user_label = ctk.CTkLabel(layout, text="Buscar Usuário", font=("Arial", 18))
+        user_label.pack(pady=(10, 5))
+
+        self.username_entry = ctk.CTkEntry(layout)
+        self.username_entry.pack(pady=(5, 10))
+        
+        self.search_button = ctk.CTkButton(layout, text="Buscar", command=self.fetch_user_data)
+        self.search_button.pack(pady=5)
+
+        self.user_image_label = ctk.CTkLabel(layout, text="")  # Placeholder for user image
+        self.user_image_label.pack()
+
+        self.verify_button = ctk.CTkButton(layout, text="Verificar", command=self.verify_follows)
+        self.verify_button.pack(pady=(10, 5))
+        
+        self.result_label = ctk.CTkLabel(layout, text="")
+        self.result_label.pack(pady=(5, 15))
+
+    def set_header(self):
+        username = self.header_entry.get()
+        self.header_id = self.get_user_id(username)
+        if self.header_id:
+            header_image = self.get_user_thumbnail(self.header_id)
+            if header_image:
+                self.header_image = header_image  # Armazena a imagem PIL
+                self.header_image_ctk = self.convert_to_ctk_image(header_image)  # Converte para CTkImage
+                self.show_image(self.header_image_ctk, self.header_image_label, is_header=True)
+                self.header_status_label.configure(text="Usuário Setado!", text_color="green")
+            else:
+                self.header_status_label.configure(text="Erro ao obter imagem do Header.", text_color="red")
+        else:
+            self.header_status_label.configure(text="Erro ao definir Header.", text_color="red")
+
+    def fetch_user_data(self):
+        username = self.username_entry.get()
+        self.user_id = self.get_user_id(username)
+        if self.user_id:
+            user_image = self.get_user_thumbnail(self.user_id)
+            if user_image:
+                self.user_image = user_image  # Armazena a imagem PIL
+                self.user_image_ctk = self.convert_to_ctk_image(user_image)  # Converte para CTkImage
+                self.show_image(self.user_image_ctk, self.user_image_label, is_header=False)
+                self.result_label.configure(text="")
+            else:
+                self.result_label.configure(text="Erro ao obter imagem do usuário.", text_color="orange")
+        else:
+            self.result_label.configure(text="Erro: Usuário não Encontrado ou Banido.", text_color="orange")
+
+    def get_user_id(self, username):
+        response = requests.post(self.base_user_id_url, json={"usernames": [username], "excludeBannedUsers": True})
+        if response.status_code == 200:
+            data = response.json().get("data")
+            if data:
+                return data[0].get("id")
+        return None
+
+    def get_user_thumbnail(self, user_id):
+        # Obter o URL da imagem de avatar
+        url = self.base_thumbnail_url.format(user_id)
+        response = requests.get(url)
+        if response.status_code == 200:
+            image_url = response.json()["data"][0]["imageUrl"]
+            
+            # Baixar a imagem
+            image_response = requests.get(image_url)
+            image = Image.open(BytesIO(image_response.content))  # Usando PIL para abrir a imagem
+            return image
+        return None
+    
+    def convert_to_ctk_image(self, pil_image):
+        # Converter imagem PIL para CTkImage
+        return CTkImage(light_image=pil_image, dark_image=pil_image)
+
+    def show_image(self, ctk_image, label, is_header):
+        label.configure(image=ctk_image)  # Configurar a imagem no label
+        label.image = ctk_image  # Manter referência da imagem
+
+    def verify_follows(self):
+        if not self.header_id:
+            self.result_label.configure(text="Erro: Defina o usuário Header primeiro.", text_color="red")
+            return
+        
+        follows = self.get_all_followings(self.user_id)
+        if str(self.header_id) in follows:
+            self.result_label.configure(text="Segue o usuário Header.", text_color="green")
+        else:
+            self.result_label.configure(text="Não segue o usuário Header.", text_color="red")
+
+    def get_all_followings(self, user_id):
+        follows = []
+        next_cursor = ""
+        while True:
+            url = self.base_follow_url.format(user_id)
+            if next_cursor:
+                url += f"&cursor={next_cursor}"
+            response = requests.get(url)
+            if response.status_code != 200:
+                break
+            data = response.json()
+            follows.extend([str(user["id"]) for user in data["data"]])
+            next_cursor = data.get("nextPageCursor")
+            if not next_cursor:
+                break
+        return follows
+
+if __name__ == '__main__':
+    app = ctk.CTk()
+    window = RobloxFollowerChecker()
+    window.mainloop()

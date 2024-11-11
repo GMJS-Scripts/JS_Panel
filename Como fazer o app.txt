@@ -1,0 +1,8 @@
+tudo no terminal
+
+cd "C:\Users\Maksu\Desktop\Programa Followers"
+
+pyinstaller --onefile --windowed Main.py
+
+ache o exe, normalmente fica na folder dist criada
+C:\Users\Maksu\Desktop\Programa Followers\dist\Main.exe
