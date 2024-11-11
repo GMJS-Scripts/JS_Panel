@@ -1,11 +1,15 @@
 import sys
 import requests
 import subprocess
+import zipfile
+import os
+import shutil
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QDialog
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QSize, QTimer
 from PIL import Image
 from io import BytesIO
+import tempfile
 
 import config
 
@@ -28,34 +32,31 @@ class AnimatedButton(QPushButton):
         super().leaveEvent(event)
 
 class UpdateDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, latest_version=None):
         super().__init__(parent)
+        self.latest_version = latest_version  # Armazena a versão mais recente
         self.setWindowTitle("Atualização Disponível")
-        self.setGeometry(100, 100, 300, 150)  # Defina o tamanho da janela
+        self.setGeometry(100, 100, 300, 150)
 
-        # Layout
         layout = QVBoxLayout()
 
-        # Mensagem
-        self.message_label = QLabel("Uma nova versão está disponível. Deseja atualizar?")
-        self.message_label.setStyleSheet("font-size: 16px; color: #333;")  # Estilo da mensagem
+        # Exibe a mensagem com a versão mais recente
+        self.message_label = QLabel(f"Uma nova versão ({self.latest_version}) está disponível. Deseja atualizar?")
+        self.message_label.setStyleSheet("font-size: 16px; color: #333;")
         layout.addWidget(self.message_label)
 
-        # Botões
         self.yes_button = QPushButton("Sim")
         self.yes_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px;")
-        self.yes_button.clicked.connect(self.accept)  # Aceitar
+        self.yes_button.clicked.connect(self.accept)
 
         self.no_button = QPushButton("Não")
         self.no_button.setStyleSheet("background-color: #f44336; color: white; padding: 10px; border-radius: 5px;")
-        self.no_button.clicked.connect(self.reject)  # Rejeitar
+        self.no_button.clicked.connect(self.reject)
 
-        # Adicionando os botões ao layout
         layout.addWidget(self.yes_button)
         layout.addWidget(self.no_button)
 
         self.setLayout(layout)
-
 
 class RobloxFollowerChecker(QWidget):
     def __init__(self):
@@ -377,42 +378,93 @@ class RobloxFollowerChecker(QWidget):
         return follows
 
     def check_version(self):
-        current_version = config.JS_FollowCheckerVersion
-        repo_url = "https://api.github.com/repos/GMJS-Scripts/JS_Panel.git/releases/latest"  # Substitua pelo seu repositório
+        """Verifica a versão mais recente do GitHub"""
         try:
-            response = requests.get(repo_url)
-            response.raise_for_status()
-            latest_release = response.json()
-            latest_version = latest_release['tag_name']  # A versão é geralmente armazenada no campo 'tag_name'
-            download_url = latest_release['assets'][0]['url']  # Obtém a URL do primeiro ativo (substitua conforme necessário)
+            response = requests.get("https://api.github.com/repos/GMJS-Scripts/JS_Panel/releases/latest")
+            if response.status_code == 200:
+                release_data = response.json()
+                latest_version = release_data['tag_name']
+                zipball_url = release_data['zipball_url']  # Usa o zipball_url para o download
 
-            if self.compare_versions(current_version, latest_version):
-                self.prompt_update(download_url)
+                # Verifica a versão atual
+                current_version = config.Version  # Aqui você define a versão atual do seu aplicativo
+
+                if latest_version != current_version:
+                    self.show_update_dialog(latest_version, zipball_url)
+                else:
+                    QMessageBox.information(self, "Sem Atualizações", "Você já está utilizando a versão mais recente!")
             else:
-                QMessageBox.information(self, "Atualização", "Você está com a versão mais recente.")
+                self.show_error("Erro ao verificar a versão.")
         except Exception as e:
-            self.show_error(f"Erro ao verificar a versão: {str(e)}")
+            print(e)
+            self.show_error(f"Erro ao verificar a versão: {e}")
 
-    def compare_versions(self, current_version, latest_version):
-        return tuple(map(int, (current_version.split(".")))) < tuple(map(int, (latest_version.lstrip('v').split("."))))  # Remove 'v' se necessário
+    def show_update_dialog(self, latest_version, zipball_url):
+        """Exibe um diálogo perguntando ao usuário se deseja atualizar"""
+        dialog = UpdateDialog(self, latest_version)
+        if dialog.exec_():
+            self.download_and_install_update(zipball_url)
 
-    def prompt_update(self, download_url):
-        dialog = UpdateDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            self.update_application(download_url)
-
-    def update_application(self, download_url):
+    def download_and_install_update(self, zipball_url):
+        """Baixa e instala a atualização"""
         try:
-            response = requests.get(download_url, headers={'Accept': 'application/octet-stream'})  # Para baixar o ativo
-            response.raise_for_status()
-            with open("updated_application.exe", "wb") as f:
-                f.write(response.content)
-            subprocess.Popen(["updated_application.exe"])
-            QMessageBox.information(self, "Atualização", "O aplicativo foi atualizado com sucesso!")
-            self.close()
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao atualizar o aplicativo: {str(e)}")
+            # Baixa o arquivo de atualização
+            response = requests.get(zipball_url)
+            if response.status_code == 200:
+                # Salva o arquivo em um diretório temporário
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_file.write(response.content)
+                    temp_file.close()
 
+                    # Descompacta o arquivo zip
+                    with zipfile.ZipFile(temp_file.name, 'r') as zip_ref:
+                        update_dir = os.path.join(os.path.dirname(temp_file.name), "update")
+                        zip_ref.extractall(update_dir)
+
+                    # Substitui os arquivos antigos pelo novo
+                    self.replace_old_files(update_dir)
+
+                    # Reinicia o aplicativo
+                    self.restart_application()
+            else:
+                self.show_error("Erro ao baixar a atualização.")
+        except Exception as e:
+            self.show_error(f"Erro durante a atualização: {e}")
+
+    def replace_old_files(self, update_dir):
+        """Substitui os arquivos antigos pelos novos"""
+        try:
+            # O diretório onde os arquivos do aplicativo estão
+            app_dir = os.path.dirname(sys.argv[0])
+
+            # Substitui todos os arquivos da versão antiga com os arquivos da versão atualizada
+            for filename in os.listdir(update_dir):
+                file_path = os.path.join(update_dir, filename)
+                if os.path.isdir(file_path):
+                    shutil.copytree(file_path, os.path.join(app_dir, filename), dirs_exist_ok=True)
+                else:
+                    shutil.copy(file_path, os.path.join(app_dir, filename))
+
+            # Remove o diretório temporário após a substituição
+            shutil.rmtree(update_dir)
+        except Exception as e:
+            self.show_error(f"Erro ao substituir os arquivos: {e}")
+
+    def restart_application(self):
+        """Reinicia o aplicativo após a atualização"""
+        try:
+            # Reinicia o aplicativo
+            subprocess.Popen([sys.executable] + sys.argv)
+            QApplication.quit()
+        except Exception as e:
+            self.show_error(f"Erro ao reiniciar o aplicativo: {e}")
+        """Reinicia o aplicativo após a atualização"""
+        try:
+            # Reinicia o aplicativo
+            subprocess.Popen([sys.executable] + sys.argv)
+            QApplication.quit()
+        except Exception as e:
+            self.show_error(f"Erro ao reiniciar o aplicativo: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
