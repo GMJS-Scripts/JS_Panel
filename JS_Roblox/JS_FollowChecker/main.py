@@ -93,7 +93,7 @@ class RobloxFollowerChecker(QWidget):
         header_label.setStyleSheet("font-size: 22px; padding: 10px; font-weight: bold; color: white;")
 
         # Caixa de entrada para o nome de usuário do header
-        self.header_entry = QLineEdit("tiogadii", self)
+        self.header_entry = QLineEdit("tiogad1", self)
         self.header_entry.setStyleSheet("font-size: 18px; background-color: #444444; padding: 10px; border-radius: 8px; color: white; text-align: center;")
         self.header_entry.setAlignment(Qt.AlignmentFlag.AlignCenter);
         # Botão para definir o header
